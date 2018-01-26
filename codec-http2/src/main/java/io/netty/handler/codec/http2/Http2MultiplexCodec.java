@@ -280,7 +280,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
         DefaultHttp2StreamChannel childChannel = ((Http2MultiplexCodecStream) stream).channel;
 
         try {
-            childChannel.fireChildExceptionCaught(cause.getCause());
+            childChannel.pipeline().fireExceptionCaught(cause.getCause());
         } finally {
             childChannel.unsafe().closeForcibly();
         }
@@ -776,10 +776,6 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
             }
         }
 
-        void fireChildExceptionCaught(Throwable cause) {
-            pipeline().fireExceptionCaught(cause);
-        }
-
         private final class Http2ChannelUnsafe implements Unsafe {
             private final VoidChannelPromise unsafeVoidPromise =
                     new VoidChannelPromise(DefaultHttp2StreamChannel.this, false);
@@ -875,7 +871,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
 
                     // Only ever send a reset frame if the connection is still alive as otherwise it makes no sense at
                     // all anyway.
-                    if (!outboundClosed && parent().isActive() &&
+                    if (parent().isActive() &&
                             !streamClosedWithoutError && isStreamIdValid(stream().id())) {
                         Http2StreamFrame resetFrame = new DefaultHttp2ResetFrame(Http2Error.CANCEL).stream(stream());
                         write(resetFrame, unsafe().voidPromise());
@@ -985,7 +981,7 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     try {
                         writeDoneAndNoFlush |= onBytesConsumed(ctx, stream, numBytesToBeConsumed);
                     } catch (Http2Exception e) {
-                        fireChildExceptionCaught(e);
+                        pipeline().fireExceptionCaught(e);
                     }
                 }
             }
@@ -998,7 +994,9 @@ public class Http2MultiplexCodec extends Http2FrameCodec {
                     return;
                 }
 
-                if (!isActive() || outboundClosed) {
+                if (!isActive() ||
+                        // Once the outbound side was closed we should not allow header / data frames
+                        outboundClosed && (msg instanceof Http2HeadersFrame || msg instanceof Http2DataFrame)) {
                     ReferenceCountUtil.release(msg);
                     promise.setFailure(CLOSED_CHANNEL_EXCEPTION);
                     return;
